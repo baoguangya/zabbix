@@ -32,9 +32,11 @@
 #define ZBX_METRIC_FLAG_PERSISTENT	0x01	/* do not overwrite old values when adding to the buffer */
 #define ZBX_METRIC_FLAG_NEW		0x02	/* new metric, just added */
 #define ZBX_METRIC_FLAG_LOG_LOG		0x04	/* log[ or log.count[, depending on ZBX_METRIC_FLAG_LOG_COUNT */
-#define ZBX_METRIC_FLAG_LOG_LOGRT	0x08	/* logrt[ or logrt.count[, depending on ZBX_METRIC_FLAG_LOG_COUNT */
+#define ZBX_METRIC_FLAG_LOG_LOGRT	0x08	/* logrt[, logrt.count[, logrtd[ or logrtd.count[, */
+						/* depending on ZBX_METRIC_FLAG_LOG_COUNT and ZBX_METRIC_FLAG_LOG_LOGDIR */
 #define ZBX_METRIC_FLAG_LOG_EVENTLOG	0x10	/* eventlog[ */
 #define ZBX_METRIC_FLAG_LOG_COUNT	0x20	/* log.count[ or logrt.count[ */
+#define ZBX_METRIC_FLAG_LOG_LOGDIR	0X40	/* logrtd[ or logrtd.count[ */
 #define ZBX_METRIC_FLAG_LOG			/* item for log file monitoring, one of the above */	\
 		(ZBX_METRIC_FLAG_LOG_LOG | ZBX_METRIC_FLAG_LOG_LOGRT | ZBX_METRIC_FLAG_LOG_EVENTLOG)
 
