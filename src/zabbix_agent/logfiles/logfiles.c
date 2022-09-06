@@ -3388,19 +3388,20 @@ static int	check_number_of_parameters(unsigned char flags, const AGENT_REQUEST *
 
 /******************************************************************************
  *                                                                            *
- * Function: init_max_lines_per_sec                                           *
+ * Function: 
+ *
  *                                                                            *
  * Comments: thread-safe if CONFIG_MAX_LINES_PER_SECOND is updated when log   *
  *           checks are not running                                           *
  *                                                                            *
  ******************************************************************************/
-static int	init_max_lines_per_sec(int is_count_item, const AGENT_REQUEST *request, int *max_lines_per_sec,
+static int	init_max_lines_per_sec(int is_count_item, int is_dir_item, const AGENT_REQUEST *request, int *max_lines_per_sec,
 		char **error)
 {
 	const char	*p;
 	int		rate;
 
-	if (NULL == (p = get_rparam(request, 3)) || '\0' == *p)
+	if (NULL == (p = get_rparam(request, 3 + is_dir_item)) || '\0' == *p)
 	{
 		if (0 == is_count_item)				/* log[], logrt[] */
 			*max_lines_per_sec = CONFIG_MAX_LINES_PER_SECOND;
@@ -3422,7 +3423,7 @@ static int	init_max_lines_per_sec(int is_count_item, const AGENT_REQUEST *reques
 	return SUCCEED;
 }
 
-static int	init_max_delay(int is_count_item, const AGENT_REQUEST *request, float *max_delay, char **error)
+static int	init_max_delay(int is_count_item, int is_dir_item, const AGENT_REQUEST *request, float *max_delay, char **error)
 {
 	const char	*max_delay_str;
 	double		max_delay_tmp;
@@ -3431,9 +3432,9 @@ static int	init_max_delay(int is_count_item, const AGENT_REQUEST *request, float
 	/* <maxdelay> is parameter 6 for log[], logrt[], but parameter 5 for log.count[], logrt.count[] */
 
 	if (0 == is_count_item)
-		max_delay_par_nr = 6;
+		max_delay_par_nr = 6 + is_dir_item;
 	else
-		max_delay_par_nr = 5;
+		max_delay_par_nr = 5 + is_dir_item;
 
 	if (NULL == (max_delay_str = get_rparam(request, max_delay_par_nr)) || '\0' == *max_delay_str)
 	{
@@ -3456,11 +3457,17 @@ static int	init_rotation_type(unsigned char flags, const AGENT_REQUEST *request,
 {
 	char	*options;
 	int	options_par_nr;
+	int	dir_item;
+	
+	if (0 != (ZBX_METRIC_FLAG_LOG_LOGDIR & flags))
+		dir_item = 1;
+	else
+		dir_item = 0;
 
 	if (0 == (ZBX_METRIC_FLAG_LOG_COUNT & flags))	/* log, logrt */
-		options_par_nr = 7;
+		options_par_nr = 7 + dir_item;
 	else						/* log.count, logrt.count */
-		options_par_nr = 6;
+		options_par_nr = 6 + dir_item;
 
 	options = get_rparam(request, options_par_nr);
 
@@ -3518,9 +3525,9 @@ int	process_log_check(char *server, unsigned short port, zbx_vector_ptr_t *regex
 		char **error)
 {
 	AGENT_REQUEST			request;
-	const char			*filename, *regexp, *encoding, *skip, *output_template;
-	char				*encoding_uc = NULL;
-	int				max_lines_per_sec, ret = FAIL, s_count, p_count, s_count_orig, is_count_item,
+	const char			*prefixname, *filename, *regexp, *encoding, *skip, *output_template;
+	char				*encoding_uc = NULL, *filename_concat = NULL, prefix_confirmed = NULL;
+	int				max_lines_per_sec, ret = FAIL, s_count, p_count, s_count_orig, is_count_item, is_dir_item, 
 					mtime_orig, big_rec_orig, logfiles_num_new = 0, jumped = 0;
 	zbx_log_rotation_options_t	rotation_type;
 	zbx_uint64_t			lastlogsize_orig;
@@ -3532,6 +3539,11 @@ int	process_log_check(char *server, unsigned short port, zbx_vector_ptr_t *regex
 	else
 		is_count_item = 0;
 
+	if (0 != (ZBX_METRIC_FLAG_LOG_LOGDIR & metric->flags))
+		is_dir_item = 1;
+	else
+		is_dir_item = 0;
+	
 	init_request(&request);
 
 	/* Expected parameters by item: */
@@ -3539,6 +3551,8 @@ int	process_log_check(char *server, unsigned short port, zbx_vector_ptr_t *regex
 	/* log.count  [file,       <regexp>,<encoding>,<maxproclines>,<mode>,         <maxdelay>, <options>] 7 params */
 	/* logrt      [file_regexp,<regexp>,<encoding>,<maxlines>,    <mode>,<output>,<maxdelay>, <options>] 8 params */
 	/* logrt.count[file_regexp,<regexp>,<encoding>,<maxproclines>,<mode>,         <maxdelay>, <options>] 7 params */
+	/* logrtd      [prefix_regexp,postfix_regexp,<regexp>,<encoding>,<maxlines>,<mode>,<output>,<maxdelay>,<options>] 9 params */
+	/* logrtd.count[prefix_regexp,postfix_regexp,<regexp>,<encoding>,<maxproclines>,<mode>,<maxdelay>,<options>] 8 params */
 
 	if (SUCCEED != parse_item_key(metric->key, &request))
 	{
@@ -3549,17 +3563,26 @@ int	process_log_check(char *server, unsigned short port, zbx_vector_ptr_t *regex
 	if (SUCCEED != check_number_of_parameters(metric->flags, &request, error))
 		goto out;
 
+	if (0 != (ZBX_METRIC_FLAG_LOG_LOGDIR & metric->flags))
+	{
+		if (NULL == (prefixname = get_rparam(&request, 0)) || '\0' == *prefixname)
+		{
+			*error = zbx_strdup(*error, "Invalid prefix name");
+			goto out;
+		}
+	}
+		
 	/* parameter 'file' or 'file_regexp' */
 
-	if (NULL == (filename = get_rparam(&request, 0)) || '\0' == *filename)
+	if (NULL == (filename = get_rparam(&request, is_dir_item)) || '\0' == *filename)
 	{
-		*error = zbx_strdup(*error, "Invalid first parameter.");
+		*error = zbx_strdup(*error, "Invalid filename parameter.");
 		goto out;
 	}
 
 	/* parameter 'regexp' */
 
-	if (NULL == (regexp = get_rparam(&request, 1)))
+	if (NULL == (regexp = get_rparam(&request, 1 + is_dir_item)))
 	{
 		regexp = "";
 	}
@@ -3571,7 +3594,7 @@ int	process_log_check(char *server, unsigned short port, zbx_vector_ptr_t *regex
 
 	/* parameter 'encoding' */
 
-	if (NULL == (encoding = get_rparam(&request, 2)))
+	if (NULL == (encoding = get_rparam(&request, 2 + is_dir_item)))
 	{
 		encoding = "";
 	}
@@ -3583,12 +3606,12 @@ int	process_log_check(char *server, unsigned short port, zbx_vector_ptr_t *regex
 	}
 
 	/* parameter 'maxlines' or 'maxproclines' */
-	if (SUCCEED !=  init_max_lines_per_sec(is_count_item, &request, &max_lines_per_sec, error))
+	if (SUCCEED !=  init_max_lines_per_sec(is_count_item, is_dir_item, &request, &max_lines_per_sec, error))
 		goto out;
 
 	/* parameter 'mode' */
 
-	if (NULL == (skip = get_rparam(&request, 4)) || '\0' == *skip || 0 == strcmp(skip, "all"))
+	if (NULL == (skip = get_rparam(&request, 4 + is_dir_item)) || '\0' == *skip || 0 == strcmp(skip, "all"))
 	{
 		metric->skip_old_data = 0;
 	}
@@ -3599,11 +3622,11 @@ int	process_log_check(char *server, unsigned short port, zbx_vector_ptr_t *regex
 	}
 
 	/* parameter 'output' (not used for log.count[], logrt.count[]) */
-	if (0 != is_count_item || (NULL == (output_template = get_rparam(&request, 5))))
+	if (0 != is_count_item || (NULL == (output_template = get_rparam(&request, 5 + is_dir_item))))
 		output_template = "";
 
 	/* parameter 'maxdelay' */
-	if (SUCCEED != init_max_delay(is_count_item, &request, &max_delay, error))
+	if (SUCCEED != init_max_delay(is_count_item, is_dir_item, &request, &max_delay, error))
 		goto out;
 
 	/* parameter 'options' */
@@ -3645,23 +3668,43 @@ int	process_log_check(char *server, unsigned short port, zbx_vector_ptr_t *regex
 		/* as there is no need to "rollback" their modifications if log.count[] or logrt.count[] result can */
 		/* not be sent to server. */
 	}
+	
+	if (1 == is_dir_item)
+	{
+		if (SUCCEED == determine_prefix_path(metric->flags, prefixname, &prefix_confirmed, &errmsg))  
+		{
+			filename_concat = zbx_dsprintf(NULL, "%s%s", prefix_confirmed, filename);
+			zbx_free(prefix_confirmed);
+			ret = SUCCEED;
+		} else {
+			zabbix_log(LOG_LEVEL_DEBUG,"failed to determine a directory for %s", prefixname);
+			zbx_free(prefix_confirmed);
+			ret = FAIL;
+		}
+	} else {
+		filename_concat = zbx_strdup(NULL, filename);
+		ret = SUCCEED;
+	}
 
-	ret = process_logrt(metric->flags, filename, &metric->lastlogsize, &metric->mtime, lastlogsize_sent, mtime_sent,
+	if (SUCCEED == ret)
+	{
+		ret = process_logrt(metric->flags, filename_concat, &metric->lastlogsize, &metric->mtime, lastlogsize_sent, mtime_sent,
 			&metric->skip_old_data, &metric->big_rec, &metric->use_ino, error, &metric->logfiles,
 			&metric->logfiles_num, &logfiles_new, &logfiles_num_new, encoding, regexps, regexp,
 			output_template, &p_count, &s_count, process_value_cb, server, port, CONFIG_HOSTNAME,
 			metric->key_orig, &jumped, max_delay, &metric->start_time, &metric->processed_bytes,
 			rotation_type);
 
-	if (0 == is_count_item && NULL != logfiles_new)
-	{
-		/* for log[] and logrt[] items - switch to the new log file list */
+		if (0 == is_count_item && NULL != logfiles_new)
+		{
+			/* for log[] and logrt[] items - switch to the new log file list */
 
-		destroy_logfile_list(&metric->logfiles, NULL, &metric->logfiles_num);
-		metric->logfiles = logfiles_new;
-		metric->logfiles_num = logfiles_num_new;
+			destroy_logfile_list(&metric->logfiles, NULL, &metric->logfiles_num);
+			metric->logfiles = logfiles_new;
+			metric->logfiles_num = logfiles_num_new;
+		}
 	}
-
+	
 	if (SUCCEED == ret)
 	{
 		metric->error_count = 0;
