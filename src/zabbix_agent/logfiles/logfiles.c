@@ -233,6 +233,91 @@ out:
 	return ret;
 }
 
+int determine_prefix_path(const char *dirname, char **dir_result, char **err_msg)
+{
+		char		*parent = NULL, *dir_regex = NULL;
+		zbx_regexp_t	*regexp = NULL;
+		const char 	*error = NULL;
+		char *fulldir = NULL;
+		struct stat buf;
+		int count = 0;
+		
+		if (SUCCEED != split_filename(dirname, &parent, &dir_regex, err_msg))
+		{
+			return FAIL;
+		}
+
+		if (SUCCEED != zbx_regexp_compile(dir_regex, &regexp, &error))
+		{
+			*err_msg = zbx_dsprintf(*err_msg, "Cannot compile a regular expression describing filename"
+					" pattern: %s", error);
+			zbx_free(parent);
+			zbx_free(dir_regex);
+			return FAIL;
+		}
+		
+		DIR		*dir = NULL;
+		struct dirent	*d_ent = NULL;
+
+		if (NULL == (dir = opendir(parent)))
+		{
+			*err_msg = zbx_dsprintf(*err_msg, "Cannot open directory \"%s\" for reading: %s", parent,
+					zbx_strerror(errno));
+			zbx_free(parent);
+			zbx_free(dir_regex);
+			zbx_regexp_free(regexp);
+			return FAIL;
+		}
+
+		while (NULL != (d_ent = readdir(dir)))
+		{
+			fulldir = zbx_dsprintf(NULL, "%s%s", parent, d_ent->d_name);
+			if (-1 == stat(fulldir, &buf))
+			{
+				*err_msg = zbx_dsprintf(*err_msg, "Cannot obtain directory information: %s", zbx_strerror(errno));
+				zbx_free(parent);
+				zbx_free(dir_regex);
+				zbx_regexp_free(regexp);
+				zbx_free(fulldir);
+				return FAIL;
+			}
+
+			if (0 != S_ISDIR(buf.st_mode) && 0 == zbx_regexp_match_precompiled(d_ent->d_name, regexp))
+			{
+				*dir_result = fulldir;
+				count = 1;
+				break;
+			}
+			zbx_free(fulldir);
+		}
+
+		if (-1 == closedir(dir))
+		{
+			*err_msg = zbx_dsprintf(*err_msg, "Cannot close directory \"%s\": %s", parent, zbx_strerror(errno));
+			zbx_free(parent);
+			zbx_free(dir_regex);
+			zbx_regexp_free(regexp);
+			zbx_free(fulldir);
+			return FAIL;
+		}
+		if (count == 1)
+		{
+			zbx_free(parent);
+			zbx_free(dir_regex);
+			zbx_regexp_free(regexp);
+			return SUCCEED;
+		}
+		else
+		{
+			*err_msg = zbx_dsprintf(*err_msg, "No directory found matching with \"%s\": ", dirname);
+			zbx_free(parent);
+			zbx_free(dir_regex);
+			zbx_regexp_free(regexp);
+			zbx_free(fulldir);
+			return FAIL;
+		}
+}
+
 /******************************************************************************
  *                                                                            *
  * Function: file_start_md5                                                   *
@@ -3671,7 +3756,7 @@ int	process_log_check(char *server, unsigned short port, zbx_vector_ptr_t *regex
 	
 	if (1 == is_dir_item)
 	{
-		if (SUCCEED == determine_prefix_path(metric->flags, prefixname, &prefix_confirmed, &errmsg))  
+		if (SUCCEED == determine_prefix_path(prefixname, &prefix_confirmed, &errmsg))  
 		{
 			filename_concat = zbx_dsprintf(NULL, "%s%s", prefix_confirmed, filename);
 			zbx_free(prefix_confirmed);
