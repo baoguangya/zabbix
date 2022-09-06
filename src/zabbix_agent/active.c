@@ -200,6 +200,10 @@ static void	add_check(const char *key, const char *key_orig, int refresh, zbx_ui
 			metric->flags |= ZBX_METRIC_FLAG_LOG_LOG | ZBX_METRIC_FLAG_LOG_COUNT;
 		else if (0 == strncmp(metric->key + 3, "rt.count[", 9))		/* logrt.count[ */
 			metric->flags |= ZBX_METRIC_FLAG_LOG_LOGRT | ZBX_METRIC_FLAG_LOG_COUNT;
+		else if (0 == strncmp(metric->key + 3, "rtd[", 4))		/* logrtd[ */
+			metric->flags |= ZBX_METRIC_FLAG_LOG_LOGRT | ZBX_METRIC_FLAG_LOG_LOGDIR;
+		else if (0 == strncmp(metric->key + 3, "rtd.count[", 10))	/* logrtd.count[ */
+			metric->flags |= ZBX_METRIC_FLAG_LOG_LOGRT | ZBX_METRIC_FLAG_LOG_LOGDIR | ZBX_METRIC_FLAG_LOG_COUNT;
 	}
 	else if (0 == strncmp(metric->key, "eventlog[", 9))
 		metric->flags |= ZBX_METRIC_FLAG_LOG_EVENTLOG;
